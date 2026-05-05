@@ -10,6 +10,7 @@ import EmptyState from './components/EmptyState'
 import Modal from './components/Modal'
 import SpanningTimetable from './components/SpanningTimetable'
 import AvailTimetable from './components/AvailTimetable'
+import AvailabilityPicker, { rangesToCells, cellsToRanges } from './components/AvailabilityPicker'
 
 import Login from './views/Login'
 import Onboarding from './views/Onboarding'
@@ -72,17 +73,15 @@ export default function App(){
   }, [])
 
   async function loadProfile(authUser){
-    // Ensure a profile row exists for this user
-    let { data } = await supabase.from('profiles').select('*').eq('id', authUser.id).maybeSingle()
-    if(!data){
-      const fallbackName = authUser.user_metadata?.name || authUser.email?.split('@')[0] || 'User'
-      await supabase.from('profiles').insert({ id: authUser.id, name: fallbackName, role: 'member' })
-      const refetch = await supabase.from('profiles').select('*').eq('id', authUser.id).maybeSingle()
-      data = refetch.data
-    }
+    // Profile rows are now created server-side by the on_auth_user_created trigger.
+    // Just read it. If it's somehow missing (legacy account), bail to login.
+    const { data } = await supabase.from('profiles').select('*').eq('id', authUser.id).maybeSingle()
     if(data){
       setProfile({ ...data, email: authUser.email })
       await loadOrgs(data.id)
+    } else {
+      // Profile missing — sign out and let user re-register
+      await supabase.auth.signOut()
     }
     setAuthReady(true)
   }
@@ -231,21 +230,34 @@ export default function App(){
     })
   }
 
-  async function saveMyAvail(w){
+  async function saveMyAvailFromCells(w, cells){
     if(!profile || !orgId) return
-    const allSlots = (weekAvail[w]||{})[profile.name] || []
-    if(!allSlots.length){ showToast('Nothing to save'); return }
-    const rows = allSlots.map(s=>({
-      organization_id: orgId,
-      user_id: profile.id, week_offset: w,
-      day_index: s.day_index, slot_index: s.slot_index,
-      is_available: s.on!==false, start_time: s.start, end_time: s.end
-    }))
-    const { error } = await supabase
+    // Wipe my existing availability for this org+week, then insert fresh ranges
+    const { error: delErr } = await supabase
       .from('availability')
-      .upsert(rows, { onConflict: 'organization_id,user_id,week_offset,day_index,slot_index' })
-    if(error) showToast('Error: '+error.message)
-    else showToast('Availability saved!')
+      .delete()
+      .eq('organization_id', orgId)
+      .eq('user_id', profile.id)
+      .eq('week_offset', w)
+    if(delErr){ showToast('Error: '+delErr.message); return }
+
+    if(!cells || cells.size === 0){
+      // refresh local state so UI reflects empty
+      setWeekAvail(prev=>({...prev, [w]: {...(prev[w]||{}), [profile.name]: []}}))
+      showToast('Availability cleared')
+      return
+    }
+
+    const ranges = cellsToRanges(cells)
+    const rows = ranges.map(r => ({
+      organization_id: orgId, user_id: profile.id, week_offset: w,
+      day_index: r.day_index, slot_index: r.slot_index,
+      is_available: true, start_time: r.start, end_time: r.end
+    }))
+    const { error } = await supabase.from('availability').insert(rows)
+    if(error){ showToast('Error: '+error.message); return }
+    setWeekAvail(prev=>({...prev, [w]: {...(prev[w]||{}), [profile.name]: ranges}}))
+    showToast('Availability saved')
   }
 
   // ── SCHEDULES ──
@@ -789,6 +801,15 @@ export default function App(){
       {!isPersonalView && !isOrgsView && view==='my-availability' && (()=>{
         const isPast = week<0
         const [bg, fg] = nameColor(profile?.name)
+        // Build initial cells from this week's existing availability for this user
+        const myRanges = (weekAvail[week]||{})[profile?.name] || []
+        const slotsByDay = {}
+        myRanges.forEach(r => {
+          if(r.on === false) return
+          if(!slotsByDay[r.day_index]) slotsByDay[r.day_index] = []
+          slotsByDay[r.day_index].push(r)
+        })
+        const initial = rangesToCells(slotsByDay)
         return(
           <div className="page">
             <div className="page-header">
@@ -803,30 +824,22 @@ export default function App(){
             <WeekNav w={week} min={0} max={4} onNav={w=>{setWeek(w); loadAvail(w)}}
               statusEl={week===0 ? <span className="pill pill-green">current</span> : <span className="pill pill-blue">upcoming</span>}/>
             <div className="card">
-              <div className="card-label">Your hours — {weekLabel(week)}</div>
-              {DAYS.map((d,di)=>{
-                const slots = getSlots(week, profile?.name, di)
-                return(
-                  <div key={d} className="day-row">
-                    <div className="day-row-head">
-                      <span style={{fontSize:'13px',fontWeight:500}}>{d}</span>
-                      {!isPast && <button className="btn btn-light btn-sm" onClick={()=>addSlot(profile.name, week, di)}>+ Add slot</button>}
-                    </div>
-                    {slots.map(slot=>(
-                      <div key={slot.slot_index} className="slot-row">
-                        <input type="checkbox" checked={slot.on!==false} disabled={isPast} onChange={e=>setSlot(profile.name, week, di, slot.slot_index, 'on', e.target.checked)}/>
-                        <input type="time" value={slot.start||'08:30'} step="900" disabled={slot.on===false||isPast} onChange={e=>setSlot(profile.name, week, di, slot.slot_index, 'start', e.target.value)}/>
-                        <span style={{color:'#888'}}>–</span>
-                        <input type="time" value={slot.end||'17:00'} step="900" disabled={slot.on===false||isPast} onChange={e=>setSlot(profile.name, week, di, slot.slot_index, 'end', e.target.value)}/>
-                        {!isPast && slots.length>1 && (
-                          <button className="btn btn-red btn-sm" onClick={()=>removeSlot(profile.name, week, di, slot.slot_index)}>×</button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )
-              })}
-              {!isPast && <button className="btn btn-teal" style={{marginTop:'12px'}} onClick={()=>saveMyAvail(week)}>Save availability</button>}
+              <div className="card-label">Paint your availability — {weekLabel(week)}</div>
+              <AvailabilityPicker
+                key={`${week}-${profile?.id}-${myRanges.length}`}
+                daySettings={daySettings}
+                initialCells={initial}
+                disabled={isPast}
+                onChange={(cells)=>{ window.__currentPickerCells = cells }}
+              />
+              {!isPast && (
+                <button
+                  className="btn btn-teal"
+                  style={{marginTop:'12px'}}
+                  onClick={()=>saveMyAvailFromCells(week, window.__currentPickerCells || initial)}>
+                  Save availability
+                </button>
+              )}
             </div>
           </div>
         )
