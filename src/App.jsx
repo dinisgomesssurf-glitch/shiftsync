@@ -328,9 +328,35 @@ export default function App(){
     const ws = weekSchedules[week]; if(!ws) return
     const under = getUnderstaffed(ws.shifts)
     if(under.length>0 && !window.confirm(`${under.length} understaffed slot(s). Publish anyway?`)) return
-    await supabase.from('schedules').update({published:true, pending_approval:false}).eq('id', ws.id)
+    await supabase.from('schedules').update({published:true, pending_approval:false, published_at: new Date().toISOString()}).eq('id', ws.id)
     setWeekSchedules(prev=>({...prev, [week]: {...prev[week], published:true, pending_approval:false}}))
-    showToast('Schedule published!')
+    showToast('Schedule published! Sending notifications...')
+    notifySchedule(ws.id, 'published')
+  }
+
+  function scheduleNotifyUpdate(schedId){
+    if(!schedId) return
+    if(window.__notifyTimer) clearTimeout(window.__notifyTimer)
+    window.__notifyTimer = setTimeout(()=>{ notifySchedule(schedId, 'updated') }, 4000)
+  }
+
+  async function notifySchedule(schedId, change_type){
+    try {
+      const { data, error } = await supabase.functions.invoke('notify-schedule', {
+        body: { schedule_id: schedId, change_type }
+      })
+      if(error){ console.warn('notify-schedule error', error); return }
+      if(data?.skipped === 'no_resend_key'){
+        showToast('Email service not configured yet')
+      } else if(data?.skipped === 'debounce'){
+        // server-side debounce, silent
+      } else if(typeof data?.sent === 'number'){
+        if(change_type === 'published') showToast(`Published. Emailed ${data.sent} member${data.sent===1?'':'s'}`)
+        else showToast(`Update emailed to ${data.sent} member${data.sent===1?'':'s'}`)
+      }
+    } catch (e) {
+      console.warn('notify failed', e)
+    }
   }
 
   async function rejectSchedule(){
@@ -353,10 +379,12 @@ export default function App(){
       return next
     })
     setEditSh(null); showToast('Shift updated')
+    if(weekSchedules[week]?.published) scheduleNotifyUpdate(weekSchedules[week].id)
   }
 
   async function removeShiftDB(di, idx){
-    const shift = weekSchedules[week].shifts[di][idx]
+    const ws = weekSchedules[week]
+    const shift = ws.shifts[di][idx]
     await supabase.from('shifts').delete().eq('id', shift.id)
     setWeekSchedules(prev=>{
       const next = JSON.parse(JSON.stringify(prev))
@@ -364,6 +392,7 @@ export default function App(){
       return next
     })
     setEditSh(null)
+    if(ws?.published) scheduleNotifyUpdate(ws.id)
   }
 
   async function assignWorker(di, member){
@@ -380,6 +409,7 @@ export default function App(){
         return next
       })
       showToast(`${member.name} assigned`)
+      if(ws.published) scheduleNotifyUpdate(ws.id)
     }
     setAssignModal(null)
   }
