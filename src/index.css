@@ -567,68 +567,95 @@ table.tt td { border: 1px solid var(--gray-100); vertical-align: top; padding: 0
 .status-swatch.s-conflict  { background: var(--s-conflict-bg);  border-color: var(--s-conflict-bd); }
 .status-swatch.s-overtime  { background: var(--s-overtime-bg);  border-color: var(--s-overtime-bd); }
 
-/* ── Timeline (stl) ───────────────────────────────────── */
+/* ── Timeline (stl): CSS grid + per-day positioned column ────── */
 .stl { --row-h: 28px; }
 .stl-banners { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
-.stl-scroll { overflow: auto; max-height: 70vh; border: 1px solid var(--gray-200); border-radius: var(--radius-md); background: #fff; }
-.stl-table  { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 700px; table-layout: fixed; }
-.stl-table thead th {
+.stl-grid {
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  background: #fff;
+  overflow: auto;
+  max-height: 70vh;
+}
+.stl-headers, .stl-body {
+  display: grid;
+  grid-template-columns: 60px repeat(7, minmax(110px, 1fr));
+  min-width: 700px;
+}
+.stl-headers {
   position: sticky; top: 0; z-index: 5;
-  background: var(--gray-50); border-bottom: 1px solid var(--gray-200);
-  padding: 8px 4px; font-size: 12px; font-weight: 600;
+  background: var(--gray-50);
+  border-bottom: 1px solid var(--gray-200);
 }
-.stl-table tbody td  { border-top: 1px solid var(--gray-100); padding: 0; vertical-align: top; height: var(--row-h); }
-.stl-row-hour td     { border-top: 1px solid var(--gray-200); }
-.stl-time {
-  position: sticky; left: 0; z-index: 4;
-  width: 56px; min-width: 56px; max-width: 56px;
-  background: var(--gray-50); border-right: 1px solid var(--gray-200);
-  font-size: 10px; color: var(--gray-500); text-align: right;
-  padding-right: 6px; line-height: 1; padding-top: 1px;
+.stl-corner { background: var(--gray-50); border-right: 1px solid var(--gray-200); }
+.stl-day-h {
+  padding: 8px 4px; text-align: center;
+  border-right: 1px solid var(--gray-100);
+  background: var(--gray-50);
 }
-.stl-corner { position: sticky; left: 0; z-index: 6; background: var(--gray-50); width: 56px; }
-.stl-day-h  { background: var(--gray-50); }
-.stl-day-name { font-weight: 600; color: var(--gray-900); }
+.stl-day-name  { font-weight: 600; font-size: 12px; color: var(--gray-900); }
 .stl-day-hours { font-weight: 400; font-size: 10px; color: var(--gray-500); margin-top: 2px; }
-.stl-cell { background: #fff; position: relative; }
-.stl-cell-block { padding: 0; }
-.stl-closed { background: var(--gray-50); }
-.stl-under  { background: rgba(244, 168, 168, 0.18); }
+
+.stl-body { position: relative; }
+.stl-time-col {
+  position: sticky; left: 0; z-index: 4;
+  background: var(--gray-50);
+  border-right: 1px solid var(--gray-200);
+  position: relative;
+}
+.stl-time-tick {
+  position: absolute; right: 6px; transform: translateY(-6px);
+  font-size: 10px; color: var(--gray-500); white-space: nowrap;
+}
+.stl-day-col {
+  position: relative;
+  border-right: 1px solid var(--gray-100);
+  overflow: hidden;
+}
+.stl-day-line {
+  position: absolute; left: 0; right: 0; height: 0;
+  border-top: 1px solid var(--gray-100);
+}
+.stl-closed-bg {
+  position: absolute; left: 0; right: 0;
+  background: repeating-linear-gradient(45deg, var(--gray-50), var(--gray-50) 4px, var(--gray-100) 4px, var(--gray-100) 8px);
+  pointer-events: none;
+}
 
 .stl-block {
   position: absolute;
   border: none; border-left-width: 3px; border-left-style: solid;
   border-radius: 4px;
-  padding: 1px 6px;
+  padding: 2px 8px;
   display: flex; align-items: center; gap: 6px;
   font-family: inherit; font-size: 12px; line-height: 1.2;
   cursor: default;
   overflow: hidden; box-sizing: border-box;
   text-align: left;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  min-height: 22px;
 }
 .stl-block.is-clickable { cursor: pointer; }
-.stl-block.is-clickable:hover { filter: brightness(0.96); }
+.stl-block.is-clickable:hover { filter: brightness(0.96); transform: translateY(-1px); transition: transform 0.08s; }
 .stl-block:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
 
 .stl-avatar {
-  flex-shrink: 0; width: 18px; height: 18px;
-  border-radius: 50%; background: rgba(255,255,255,0.55);
+  flex-shrink: 0; width: 20px; height: 20px;
+  border-radius: 50%; background: rgba(255,255,255,0.6);
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 9px; font-weight: 700;
+  font-size: 10px; font-weight: 700;
 }
-.stl-block-body { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.stl-block-body { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 1px; }
 .stl-block-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.stl-block-time { font-size: 10px; opacity: 0.85; }
+.stl-block-time { font-size: 10px; opacity: 0.85; white-space: nowrap; }
 .stl-block-warn { margin-left: auto; font-size: 11px; }
 
-/* Density modes shrink avatars/text */
-.stl-compact .stl-avatar { width: 14px; height: 14px; font-size: 8px; }
-.stl-compact .stl-block { font-size: 11px; padding: 0 5px; }
+.stl-compact .stl-avatar { width: 16px; height: 16px; font-size: 9px; }
+.stl-compact .stl-block { font-size: 11px; padding: 1px 6px; min-height: 18px; }
 .stl-compact .stl-block-time { display: none; }
 
 .stl-dense .stl-avatar { display: none; }
-.stl-dense .stl-block { font-size: 10px; padding: 0 4px; gap: 2px; }
+.stl-dense .stl-block { font-size: 10px; padding: 1px 5px; gap: 2px; min-height: 14px; }
 .stl-dense .stl-block-time { display: none; }
 .stl-dense .stl-block-name { font-weight: 500; }
 
@@ -639,6 +666,7 @@ table.tt td { border: 1px solid var(--gray-100); vertical-align: top; padding: 0
   border-radius: 4px; font-size: 10px; font-weight: 600;
   cursor: pointer; padding: 0 4px;
   display: flex; align-items: center; justify-content: center;
+  z-index: 50;
 }
 .stl-overflow:hover { background: var(--gray-200); }
 .stl-overflow-list { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow-y: auto; }
