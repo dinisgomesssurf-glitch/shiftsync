@@ -9,6 +9,7 @@ import Topbar from './components/Topbar'
 import EmptyState from './components/EmptyState'
 import Modal from './components/Modal'
 import SpanningTimetable from './components/SpanningTimetable'
+import ScheduleView from './components/ScheduleView'
 import AvailTimetable from './components/AvailTimetable'
 import AvailabilityPicker, { rangesToCells, cellsToRanges } from './components/AvailabilityPicker'
 
@@ -632,8 +633,8 @@ export default function App(){
           <div className="card" style={{padding:'12px'}}>
             <div className="card-label">{ws ? (week>=0?'Click any block to edit':'Read only') : 'No schedule yet'}</div>
             {ws ? (
-              <SpanningTimetable
-                shifts={ws.shifts}
+              <ScheduleView
+                shiftsByDay={ws.shifts}
                 daySettings={daySettings}
                 axisS={axisS} axisE={axisE}
                 staffingReqs={staffingReqs}
@@ -642,6 +643,7 @@ export default function App(){
                 onEditShift={handleTimetableAction}
                 showUnderstaffed={week>=0}
                 cannotAlone={cannotAlone}
+                published={!!ws.published}
               />
             ) : (
               <EmptyState
@@ -679,9 +681,9 @@ export default function App(){
                 {isExp && (
                   <div className="hist-body">
                     {h ? (
-                      <SpanningTimetable shifts={h.shifts} daySettings={daySettings} axisS={axisS} axisE={axisE}
+                      <ScheduleView shiftsByDay={h.shifts} daySettings={daySettings} axisS={axisS} axisE={axisE}
                         staffingReqs={staffingReqs} editable={false} members={members} onEditShift={null}
-                        showUnderstaffed={false} cannotAlone={cannotAlone}/>
+                        showUnderstaffed={false} cannotAlone={cannotAlone} published={!!h.published}/>
                     ) : (
                       <p className="muted" style={{padding:'12px'}}>No schedule for this week.</p>
                     )}
