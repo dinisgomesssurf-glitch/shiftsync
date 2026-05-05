@@ -366,6 +366,17 @@ export default function App(){
     showToast('Sent back for revision')
   }
 
+  async function unpublishSchedule(){
+    const ws = weekSchedules[week]; if(!ws) return
+    if(!window.confirm('Unpublish this schedule? Members will no longer see their shifts.')) return
+    const { error } = await supabase.from('schedules')
+      .update({ published:false, pending_approval:false })
+      .eq('id', ws.id)
+    if(error){ showToast('Error: '+error.message); return }
+    setWeekSchedules(prev=>({...prev, [week]: {...prev[week], published:false, pending_approval:false}}))
+    showToast('Schedule unpublished')
+  }
+
   async function saveShiftEdit(di, idx){
     const s = document.getElementById('es').value, e = document.getElementById('ee').value
     if(toMins(e) <= toMins(s)){ alert('End must be after start'); return }
@@ -597,7 +608,11 @@ export default function App(){
                   <button className="btn btn-teal" onClick={approveAndPublish}>Approve &amp; publish</button>
                   <button className="btn btn-red" onClick={rejectSchedule}>Send back</button>
                 </>}
-                {ws?.published && <span className="pill pill-green">Published</span>}
+                {ws?.published && <>
+                  <span className="pill pill-green">Published</span>
+                  <button className="btn btn-light" onClick={()=>notifySchedule(ws.id, 'updated')}>Resend email</button>
+                  <button className="btn btn-red" onClick={unpublishSchedule}>Unpublish</button>
+                </>}
               </div>
             )}
           </div>
@@ -939,23 +954,4 @@ export default function App(){
                 </div>
                 {isExp && (
                   <div className="hist-body" style={{padding:'10px 16px'}}>
-                    {!h && <p className="muted">Loading…</p>}
-                    {h && myShifts.length===0 && <p className="muted">No shifts this week.</p>}
-                    {h && myShifts.map(({d,sh})=>(
-                      <div key={d} className="shift-row">
-                        <span style={{fontSize:'13px',fontWeight:500,minWidth:'36px'}}>{d}</span>
-                        <div style={{display:'flex',flexDirection:'column',gap:'3px'}}>
-                          {sh.map((s,i)=><div key={i} className={`sblock ${nameShiftColor(profile?.name)}`}><span className="sn">{s.start_time} – {s.end_time}</span></div>)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
+                    {!h && <p className="muted">Loading
