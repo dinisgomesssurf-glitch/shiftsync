@@ -167,7 +167,7 @@ body {
 
 /* ───────────────────── page ───────────────────── */
 .page { padding: 20px 16px 60px; max-width: 760px; margin: 0 auto; }
-.page-wide { max-width: 1180px; }
+.page-wide { max-width: 1500px; }
 .page-header {
   display: flex; align-items: flex-start; justify-content: space-between;
   margin-bottom: 18px; flex-wrap: wrap; gap: 10px;
@@ -699,7 +699,13 @@ table.tt td { border: 1px solid var(--gray-100); vertical-align: top; padding: 0
 /* ── Compact (cmp) ─────────────────────────────────── */
 .cmp-wrap { background: #fff; border: 1px solid var(--gray-200); border-radius: var(--radius-md); overflow: hidden; }
 .cmp-scroll { overflow: auto; max-height: 70vh; }
-.cmp-table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 880px; }
+.cmp-table {
+  border-collapse: separate; border-spacing: 0; width: 100%;
+  min-width: 1100px; table-layout: fixed;
+}
+.cmp-table colgroup col.cmp-col-worker { width: 200px; }
+.cmp-table colgroup col.cmp-col-seg    { width: 60px; }
+.cmp-table colgroup col.cmp-col-total  { width: 80px; }
 .cmp-table th, .cmp-table td {
   border-bottom: 1px solid var(--gray-100);
   border-right: 1px solid var(--gray-100);
@@ -722,7 +728,7 @@ table.tt td { border: 1px solid var(--gray-100); vertical-align: top; padding: 0
 }
 .cmp-avatar  { width: 26px; height: 26px; font-size: 10px; }
 .cmp-worker-name { font-weight: 500; color: var(--gray-900); white-space: nowrap; }
-.cmp-cell { padding: 4px; text-align: center; }
+.cmp-cell { padding: 4px 2px; text-align: center; min-width: 60px; }
 .cmp-cell-empty { background: var(--gray-50); }
 .cmp-pill {
   display: inline-block; padding: 2px 8px; border-radius: 12px;

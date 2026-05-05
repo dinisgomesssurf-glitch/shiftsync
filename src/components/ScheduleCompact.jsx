@@ -30,6 +30,13 @@ export default function ScheduleCompact({
     <div className="cmp-wrap">
       <div className="cmp-scroll">
         <table className="cmp-table">
+          <colgroup>
+            <col className="cmp-col-worker"/>
+            {DAYS.map(d => SEGMENTS.map(s => (
+              <col key={d+s.key} className="cmp-col-seg"/>
+            )))}
+            <col className="cmp-col-total"/>
+          </colgroup>
           <thead>
             <tr>
               <th rowSpan={2} className="cmp-worker-h">Worker</th>
