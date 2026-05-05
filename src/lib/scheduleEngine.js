@@ -4,27 +4,55 @@ import { toMins, toTime } from './utils'
 
 export const COVERAGE_GRANULARITY = 15 // minutes per coverage cell
 
-// ───────── Lane assignment (interval-graph greedy) ─────────
-// Each shift gets a lane index so concurrent shifts never share a lane.
-// O(n log n). Lanes are reused as they become free.
+// ───────── Lane + cluster assignment (FullCalendar / Google Calendar pattern) ─────────
+// A "cluster" is a group of shifts that transitively overlap. Cluster size is the
+// max concurrent overlap inside the cluster — that's the width divisor used at render
+// time, NOT the day-wide max. Non-overlapping shifts get a fresh cluster of size 1
+// and render full-width. O(n log n).
 export function assignLanes(dayShifts){
   const sorted = [...(dayShifts || [])].sort((a, b) => {
     const da = toMins(a.start_time) - toMins(b.start_time)
     if (da !== 0) return da
     return toMins(a.end_time) - toMins(b.end_time)
   })
-  const laneEnds = [] // index = lane, value = last end-min in that lane
-  const result = sorted.map(sh => {
+  const result = []
+  let cluster = null
+  let clusterEnd = -Infinity
+
+  function startCluster(){
+    cluster = { shifts: [], laneEnds: [] }
+  }
+  function finalizeCluster(){
+    if (!cluster) return
+    const size = cluster.laneEnds.length
+    for (const s of cluster.shifts) s._clusterSize = size
+    cluster = null
+  }
+
+  for (const sh of sorted) {
     const s = toMins(sh.start_time), e = toMins(sh.end_time)
-    let lane = -1
-    for (let i = 0; i < laneEnds.length; i++) {
-      if (laneEnds[i] <= s) { lane = i; break }
+    if (s >= clusterEnd) {
+      finalizeCluster()
+      startCluster()
+      clusterEnd = e
+    } else {
+      clusterEnd = Math.max(clusterEnd, e)
     }
-    if (lane < 0) { lane = laneEnds.length; laneEnds.push(e) }
-    else laneEnds[lane] = e
-    return { ...sh, _lane: lane, _startM: s, _endM: e }
-  })
-  return { shifts: result, laneCount: laneEnds.length }
+    // Greedy lane within the cluster
+    let lane = -1
+    for (let i = 0; i < cluster.laneEnds.length; i++) {
+      if (cluster.laneEnds[i] <= s) { lane = i; break }
+    }
+    if (lane < 0) { lane = cluster.laneEnds.length; cluster.laneEnds.push(e) }
+    else cluster.laneEnds[lane] = e
+    const tagged = { ...sh, _lane: lane, _startM: s, _endM: e, _clusterSize: 1 }
+    cluster.shifts.push(tagged)
+    result.push(tagged)
+  }
+  finalizeCluster()
+
+  const laneCount = result.reduce((m, s) => Math.max(m, s._clusterSize), 0)
+  return { shifts: result, laneCount }
 }
 
 // ───────── Coverage matrix ─────────

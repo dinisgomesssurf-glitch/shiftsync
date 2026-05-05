@@ -579,7 +579,7 @@ table.tt td { border: 1px solid var(--gray-100); vertical-align: top; padding: 0
 }
 .stl-headers, .stl-body {
   display: grid;
-  grid-template-columns: 60px repeat(7, minmax(110px, 1fr));
+  grid-template-columns: 60px repeat(7, minmax(150px, 1fr));
   min-width: 700px;
 }
 .stl-headers {
@@ -618,8 +618,9 @@ table.tt td { border: 1px solid var(--gray-100); vertical-align: top; padding: 0
 }
 .stl-closed-bg {
   position: absolute; left: 0; right: 0;
-  background: repeating-linear-gradient(45deg, var(--gray-50), var(--gray-50) 4px, var(--gray-100) 4px, var(--gray-100) 8px);
+  background: repeating-linear-gradient(45deg, var(--gray-50), var(--gray-50) 6px, rgba(0,0,0,0.025) 6px, rgba(0,0,0,0.025) 8px);
   pointer-events: none;
+  opacity: 0.7;
 }
 
 .stl-block {
@@ -658,6 +659,24 @@ table.tt td { border: 1px solid var(--gray-100); vertical-align: top; padding: 0
 .stl-dense .stl-block { font-size: 10px; padding: 1px 5px; gap: 2px; min-height: 14px; }
 .stl-dense .stl-block-time { display: none; }
 .stl-dense .stl-block-name { font-weight: 500; }
+
+
+/* Narrow lane: hide name+time text, show only avatar (and warn icon).
+   Tooltip and aria-label keep info accessible. */
+.stl-block.is-narrow .stl-block-body { display: none; }
+.stl-block.is-narrow { padding: 2px; justify-content: center; }
+.stl-block.is-narrow .stl-avatar {
+  width: 22px; height: 22px; font-size: 10px;
+  background: rgba(255,255,255,0.85);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+}
+.stl-block.is-narrow .stl-block-warn {
+  position: absolute; top: 2px; right: 2px; margin: 0; font-size: 9px;
+}
+/* Compact density narrow */
+.stl-compact .stl-block.is-narrow .stl-avatar { width: 18px; height: 18px; font-size: 9px; }
+.stl-dense   .stl-block.is-narrow .stl-avatar { display: none; }
+.stl-dense   .stl-block.is-narrow::after { content: '·'; color: currentColor; font-size: 14px; }
 
 .stl-overflow {
   position: absolute;

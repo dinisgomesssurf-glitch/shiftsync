@@ -5,7 +5,7 @@ import Modal from './Modal'
 
 // Pixels per HOUR (not per 30-min). Density toggles change this.
 const PX_PER_HOUR = { comfortable: 64, compact: 40, dense: 24 }
-const MAX_LANES_VISIBLE = 4
+const MAX_LANES_VISIBLE = 3
 const SLOT_MIN = 15 // sub-row (for label increments only)
 
 export default function ScheduleTimeline({
@@ -73,14 +73,23 @@ export default function ScheduleTimeline({
     const dur = sh._endM - sh._startM
     const top = (sh._startM - aS) * pxPerMin
     const height = Math.max(20, dur * pxPerMin - 2)
-    const widthPct = 100 / Math.max(1, visibleCount + (opts.hasOverflow ? 1 : 0))
+    // Width is driven by THIS shift's cluster size (not the day-wide max).
+    // If the cluster has more concurrent shifts than we can display, we shrink to
+    // visibleCount+1 to leave room for the overflow chip.
+    const localSize = sh._clusterSize || 1
+    const denom = (opts.hasOverflow && localSize > visibleCount)
+      ? visibleCount + 1
+      : Math.min(localSize, visibleCount + (opts.hasOverflow ? 1 : 0))
+    const widthPct = 100 / Math.max(1, denom)
     const leftPct = sh._lane * widthPct
     const status = deriveStatus(sh, { published, conflictsSet, reasons })
     const conflictReason = (reasons[sh.id] || []).join(', ')
+    // Mark blocks below 90px wide so CSS can compact text
+    const isNarrow = denom >= 3
 
     return (
       <button key={sh.id || `${sh.name}-${sh._startM}-${sh._lane}`}
-        className={`stl-block s-${status} ${editable?'is-clickable':''}`}
+        className={`stl-block s-${status} ${editable?'is-clickable':''} ${isNarrow?'is-narrow':''}`}
         onClick={()=>handleClick(di, sh)}
         disabled={!editable}
         style={{
