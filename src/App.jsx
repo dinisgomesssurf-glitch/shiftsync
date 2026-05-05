@@ -954,4 +954,23 @@ export default function App(){
                 </div>
                 {isExp && (
                   <div className="hist-body" style={{padding:'10px 16px'}}>
-                    {!h && <p className="muted">Loading
+                    {!h && <p className="muted">Loading…</p>}
+                    {h && myShifts.length===0 && <p className="muted">No shifts this week.</p>}
+                    {h && myShifts.map(({d,sh})=>(
+                      <div key={d} className="shift-row">
+                        <span style={{fontSize:'13px',fontWeight:500,minWidth:'36px'}}>{d}</span>
+                        <div style={{display:'flex',flexDirection:'column',gap:'3px'}}>
+                          {sh.map((s,i)=><div key={i} className={`sblock ${nameShiftColor(profile?.name)}`}><span className="sn">{s.start_time} – {s.end_time}</span></div>)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
