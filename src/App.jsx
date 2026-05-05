@@ -406,12 +406,16 @@ export default function App(){
     if(ws?.published) scheduleNotifyUpdate(ws.id)
   }
 
-  async function assignWorker(di, member){
+  async function assignWorker(di, member, req){
     const ws = weekSchedules[week]; if(!ws) return
     const ds = daySettings[di] || {open_time:'08:30', close_time:'19:00'}
+    // If this came from an understaffed slot, fill exactly that slot;
+    // otherwise default to the full opening hours of the day.
+    const start_time = req?.start_time || ds.open_time
+    const end_time   = req?.end_time   || ds.close_time
     const { data } = await supabase.from('shifts').insert({
       schedule_id: ws.id, user_id: member.id, day_index: di,
-      start_time: ds.open_time, end_time: ds.close_time
+      start_time, end_time
     }).select('*, profiles:user_id(name)').single()
     if(data){
       setWeekSchedules(prev=>{
@@ -521,7 +525,7 @@ export default function App(){
             {members.filter(m=>!(ws?.shifts[assignModal.di]||[]).some(s=>s.name===m.name)).map(m=>{
               const [bg, fg] = nameColor(m.name)
               return(
-                <button key={m.id} className="btn assign-row" onClick={()=>assignWorker(assignModal.di, m)}>
+                <button key={m.id} className="btn assign-row" onClick={()=>assignWorker(assignModal.di, m, assignModal.req)}>
                   <div className="avatar" style={{width:24, height:24, fontSize:'10px', background:bg, color:fg}}>{initials(m.name)}</div>
                   {m.name}
                 </button>
