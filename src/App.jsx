@@ -591,7 +591,7 @@ export default function App(){
 
       {/* TIMETABLE (admin) */}
       {!isPersonalView && !isOrgsView && view==='timetable' && (
-        <div className="page">
+        <div className="page page-wide">
           <div className="page-header">
             <div>
               <div className="page-title">Timetable</div>
@@ -651,7 +651,7 @@ export default function App(){
 
       {/* HISTORY */}
       {!isPersonalView && !isOrgsView && view==='history' && (
-        <div className="page">
+        <div className="page page-wide">
           <div className="page-header">
             <div>
               <div className="page-title">Schedule history</div>
@@ -693,7 +693,7 @@ export default function App(){
       {!isPersonalView && !isOrgsView && view==='availability' && (()=>{
         const avail = weekAvail[week]||{}
         return(
-          <div className="page">
+          <div className="page page-wide">
             <div className="page-header">
               <div>
                 <div className="page-title">Availability</div>
@@ -896,7 +896,7 @@ export default function App(){
         const myShifts = sched ? DAYS.map((d,di)=>({d, sh: sched.shifts[di].filter(s=>s.name===profile?.name)})) : []
         const shiftDays = myShifts.filter(x=>x.sh.length)
         return(
-          <div className="page">
+          <div className="page page-wide">
             <div className="page-header">
               <div>
                 <div className="page-title">My shifts</div>
@@ -933,7 +933,7 @@ export default function App(){
 
       {/* MY HISTORY */}
       {!isPersonalView && !isOrgsView && view==='my-history' && (
-        <div className="page">
+        <div className="page page-wide">
           <div className="page-header">
             <div>
               <div className="page-title">My history</div>
