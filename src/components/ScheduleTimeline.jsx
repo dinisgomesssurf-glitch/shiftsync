@@ -134,7 +134,7 @@ export default function ScheduleTimeline({
         <div className="stl-headers">
           <div className="stl-corner"/>
           {DAYS.map((d, di) => (
-            <div key={d} className="stl-day-h">
+            <div key={d} className={`stl-day-h stl-col-${di} ${di>=5?'stl-col-weekend':''} ${di%2===0?'stl-col-a':'stl-col-b'}`}>
               <div className="stl-day-name">{d}</div>
               <div className="stl-day-hours">{daySettings[di]?.open_time}–{daySettings[di]?.close_time}</div>
             </div>
@@ -167,7 +167,7 @@ export default function ScheduleTimeline({
             const overflowShifts = lanedShifts.filter(s => s._lane >= visibleCount)
 
             return (
-              <div key={di} className="stl-day-col">
+              <div key={di} className={`stl-day-col stl-col-${di} ${di>=5?'stl-col-weekend':''} ${di%2===0?'stl-col-a':'stl-col-b'}`}>
                 {/* Hour grid lines */}
                 {hourMarks.map(m => (
                   <div key={m} className="stl-day-line" style={{top: ((m - aS) * pxPerMin) + 'px'}}/>

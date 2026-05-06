@@ -887,3 +887,16 @@ table.tt td { border: 1px solid var(--gray-100); vertical-align: top; padding: 0
   .roster-row { grid-template-columns: 1fr; }
   .roster-days { grid-template-columns: repeat(7, minmax(60px, 1fr)); overflow-x: auto; }
 }
+
+/* ── Timeline: distinct day columns ────────────────── */
+.stl-day-col.stl-col-a   { background: #fff; }
+.stl-day-col.stl-col-b   { background: var(--gray-50); }
+.stl-day-col.stl-col-weekend { background: #FBF9F4; }
+.stl-day-col              { border-right: 1px solid var(--gray-200); }
+.stl-day-col:last-child   { border-right: none; }
+
+.stl-day-h.stl-col-a       { background: var(--gray-50); }
+.stl-day-h.stl-col-b       { background: #EFEFEC; }
+.stl-day-h.stl-col-weekend { background: #F4F0E5; }
+.stl-day-h                 { border-right: 1px solid var(--gray-200); }
+.stl-day-h:last-child      { border-right: none; }
