@@ -842,3 +842,48 @@ table.tt td { border: 1px solid var(--gray-100); vertical-align: top; padding: 0
   border-radius: 3px; border: 1px solid rgba(0,0,0,0.06);
   vertical-align: -2px; margin-right: 4px;
 }
+
+/* ── Person roster under schedule ───────────────────── */
+.roster { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--gray-200); }
+.roster-list { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+.roster-row {
+  display: grid; grid-template-columns: 200px 1fr; gap: 14px;
+  padding: 10px 12px; background: #fff;
+  border: 1px solid var(--gray-200); border-radius: var(--radius-md);
+}
+.roster-who { display: flex; align-items: center; gap: 10px; }
+.roster-avatar { width: 32px; height: 32px; font-size: 11px; }
+.roster-who-text { min-width: 0; }
+.roster-name  { font-size: 13px; font-weight: 600; color: var(--gray-900); }
+.roster-total { font-size: 11px; color: var(--gray-500); margin-top: 2px; }
+.roster-days {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px;
+}
+.roster-day { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.roster-day-h { font-size: 10px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.04em; }
+.roster-day-off .roster-day-h { color: var(--gray-300); }
+.roster-shifts { display: flex; flex-direction: column; gap: 3px; }
+.roster-pill {
+  display: inline-block; padding: 2px 8px; border-radius: 12px;
+  font-size: 11px; font-weight: 600; border: 1px solid; line-height: 1.4;
+  white-space: nowrap;
+}
+.roster-off { font-size: 11px; color: var(--gray-300); }
+
+/* ── Compact: segment time headers + distinct day stripes ── */
+.cmp-seg-h .cmp-seg-letter { font-size: 11px; font-weight: 700; color: var(--gray-700); }
+.cmp-seg-h .cmp-seg-time   { font-size: 9px; color: var(--gray-500); margin-top: 1px; font-variant-numeric: tabular-nums; }
+.cmp-day-a { background: #fff !important; }
+.cmp-day-b { background: var(--gray-50) !important; }
+.cmp-day-h.cmp-day-a { background: var(--gray-50) !important; }
+.cmp-day-h.cmp-day-b { background: #EFEFEC !important; }
+.cmp-day-start { border-left: 2px solid var(--gray-300) !important; }
+
+@media (max-width: 1100px) {
+  .roster-row { grid-template-columns: 160px 1fr; }
+  .roster-days { grid-template-columns: repeat(7, minmax(70px, 1fr)); }
+}
+@media (max-width: 720px) {
+  .roster-row { grid-template-columns: 1fr; }
+  .roster-days { grid-template-columns: repeat(7, minmax(60px, 1fr)); overflow-x: auto; }
+}

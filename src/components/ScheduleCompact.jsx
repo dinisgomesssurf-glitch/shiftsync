@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { DAYS, toMins, initials, nameColor } from '../lib/utils'
-import { SEGMENTS, shiftFitsSegment, totalHours, deriveStatus } from '../lib/scheduleEngine'
+import { DAYS, toMins, initials } from '../lib/utils'
+import { SEGMENTS, shiftFitsSegment, totalHours, deriveStatus, buildPersonColors, personColor } from '../lib/scheduleEngine'
 
 export default function ScheduleCompact({
   shiftsByDay, members = [], onEditShift, editable,
@@ -26,6 +26,8 @@ export default function ScheduleCompact({
 
   const weeklyTotals = data.map(row => totalHours(row.days.flat(2).filter((sh,i,a)=>a.indexOf(sh)===i)))
 
+  const personColors = buildPersonColors(members)
+
   return (
     <div className="cmp-wrap">
       <div className="cmp-scroll">
@@ -40,18 +42,21 @@ export default function ScheduleCompact({
           <thead>
             <tr>
               <th rowSpan={2} className="cmp-worker-h">Worker</th>
-              {DAYS.map(d => <th key={d} colSpan={SEGMENTS.length} className="cmp-day-h">{d}</th>)}
+              {DAYS.map((d, di) => <th key={d} colSpan={SEGMENTS.length} className={`cmp-day-h cmp-day-${di%2===0?'a':'b'}`}>{d}</th>)}
               <th rowSpan={2} className="cmp-total-h">Total</th>
             </tr>
             <tr>
-              {DAYS.map(d => SEGMENTS.map(s => (
-                <th key={d+s.key} className="cmp-seg-h" title={`${s.start}–${s.end}`}>{s.label[0]}</th>
+              {DAYS.map((d, di) => SEGMENTS.map((s, si) => (
+                <th key={d+s.key} className={`cmp-seg-h ${si===0?'cmp-day-start':''}`} title={`${s.label} · ${s.start}–${s.end}`}>
+                  <div className="cmp-seg-letter">{s.label[0]}</div>
+                  <div className="cmp-seg-time">{s.start}</div>
+                </th>
               )))}
             </tr>
           </thead>
           <tbody>
             {data.map((row, ri)=>{
-              const [bg, fg] = nameColor(row.name)
+              const c = personColor(personColors, row.name); const bg = c.bg, fg = c.fg
               return (
                 <tr key={row.id||row.name}>
                   <th className="cmp-worker">
@@ -60,13 +65,14 @@ export default function ScheduleCompact({
                   </th>
                   {DAYS.map((d, di) => SEGMENTS.map((seg, si) => {
                     const cellShifts = row.days[di][si]
-                    if (!cellShifts.length) return <td key={d+seg.key} className="cmp-cell cmp-cell-empty"/>
+                    const dayClass = `cmp-day-${di%2===0?'a':'b'} ${si===0?'cmp-day-start':''}`
+                    if (!cellShifts.length) return <td key={d+seg.key} className={`cmp-cell cmp-cell-empty ${dayClass}`}/>
                     // Render combined hours; if multiple, summarize
                     const sample = cellShifts[0]
                     const status = deriveStatus(sample, { published, conflictsSet, reasons })
                     const tip = cellShifts.map(s=>`${s.start_time}–${s.end_time}`).join(', ')
                     return (
-                      <td key={d+seg.key} className={`cmp-cell s-${status}`} title={tip}>
+                      <td key={d+seg.key} className={`cmp-cell s-${status} ${dayClass}`} title={tip}>
                         <button
                           className="cmp-pill"
                           disabled={!editable}

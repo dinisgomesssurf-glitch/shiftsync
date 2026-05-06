@@ -209,3 +209,22 @@ export function shiftFitsSegment(sh, seg){
 export function totalHours(shifts){
   return (shifts || []).reduce((acc, s) => acc + (toMins(s.end_time) - toMins(s.start_time)) / 60, 0)
 }
+
+// ───────── Person colors (stable identity color, used INSIDE blocks beside status) ─────────
+const PERSON_PALETTE = [
+  ['#0C447C','#E6F1FB'],['#085041','#E1F5EE'],['#633806','#FAEEDA'],
+  ['#72243E','#FBEAF0'],['#3C3489','#EEEDFE'],['#27500A','#EAF3DE'],
+  ['#712B13','#FAECE7'],['#444441','#F1EFE8'],
+]
+export function buildPersonColors(members){
+  const map = {}
+  ;(members || []).forEach((m, i) => {
+    const [fg, bg] = PERSON_PALETTE[i % PERSON_PALETTE.length]
+    if (m.name) map[m.name] = { fg, bg }
+    if (m.id)   map[m.id]   = { fg, bg }
+  })
+  return map
+}
+export function personColor(map, key){
+  return map?.[key] || { fg:'#444', bg:'#eee' }
+}

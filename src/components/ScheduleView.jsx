@@ -3,6 +3,7 @@ import ScheduleViewSwitcher from './ScheduleViewSwitcher'
 import ScheduleTimeline from './ScheduleTimeline'
 import ScheduleCompact from './ScheduleCompact'
 import ScheduleCoverage from './ScheduleCoverage'
+import ScheduleRoster from './ScheduleRoster'
 import { detectConflicts } from '../lib/scheduleEngine'
 
 export default function ScheduleView({
@@ -57,6 +58,8 @@ export default function ScheduleView({
           axisS={axisS} axisE={axisE}
         />
       )}
+
+      <ScheduleRoster shiftsByDay={shiftsByDay} members={members}/>
     </div>
   )
 }

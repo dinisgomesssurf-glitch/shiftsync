@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { DAYS, toMins, toTime, initials } from '../lib/utils'
-import { assignLanes, deriveStatus } from '../lib/scheduleEngine'
+import { assignLanes, deriveStatus, buildPersonColors, personColor } from '../lib/scheduleEngine'
 import Modal from './Modal'
 
 // Pixels per HOUR (not per 30-min). Density toggles change this.
@@ -45,6 +45,7 @@ export default function ScheduleTimeline({
 
   // Lane assignment per day, memoized
   const dayLanes = useMemo(() => DAYS.map((_, di) => assignLanes(shiftsByDay[di] || [])), [shiftsByDay])
+  const personColors = useMemo(() => buildPersonColors(members), [members])
 
   // Understaffed banner data
   const understaffed = useMemo(() => {
@@ -101,7 +102,7 @@ export default function ScheduleTimeline({
         }}
         aria-label={`${sh.name}, ${sh.start_time} to ${sh.end_time}${conflictReason ? ', '+conflictReason : ''}`}
         title={conflictReason ? `${sh.name} · ${sh.start_time}–${sh.end_time}\n${conflictReason}` : `${sh.name} · ${sh.start_time}–${sh.end_time}`}>
-        <span className="stl-avatar">{initials(sh.name)}</span>
+        <span className="stl-avatar" style={{background: personColor(personColors, sh.name).bg, color: personColor(personColors, sh.name).fg}}>{initials(sh.name)}</span>
         <span className="stl-block-body">
           <span className="stl-block-name">{sh.name}</span>
           <span className="stl-block-time">{sh.start_time}–{sh.end_time}</span>
@@ -220,7 +221,7 @@ export default function ScheduleTimeline({
               const status = deriveStatus(sh, { published, conflictsSet, reasons })
               return (
                 <button key={sh.id} className={`stl-overflow-row s-${status}`} onClick={()=>{setOverflowDay(null); handleClick(overflowDay.di, sh)}}>
-                  <span className="stl-avatar">{initials(sh.name)}</span>
+                  <span className="stl-avatar" style={{background: personColor(personColors, sh.name).bg, color: personColor(personColors, sh.name).fg}}>{initials(sh.name)}</span>
                   <span style={{flex:1}}>
                     <span style={{fontWeight:600}}>{sh.name}</span>
                     <span style={{display:'block',fontSize:11,opacity:.8}}>{sh.start_time}–{sh.end_time}</span>

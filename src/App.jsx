@@ -290,19 +290,52 @@ export default function App(){
     const maxMap = {}
     constraints.filter(c=>c.type==='max shifts/week').forEach(c => maxMap[c.person] = parseInt(c.detail)||99)
     const cnt = {}
-    const byDay = DAYS.map((_,di)=>{
-      const ds = daySettings[di] || {open_time:'08:30', close_time:'19:00'}
-      const oM = toMins(ds.open_time), cM = toMins(ds.close_time), out = []
-      members.forEach(m=>{
-        const slots = (avail[m.name]||[]).filter(s=>s.day_index===di && s.on!==false)
-        slots.forEach(slot=>{
-          if(maxMap[m.name] && (cnt[m.name]||0) >= maxMap[m.name]) return
-          const s = Math.max(toMins(slot.start), oM), e = Math.min(toMins(slot.end), cM)
-          if(e>s){ out.push({name:m.name, user_id:m.id, start_time:toTime(s), end_time:toTime(e)}); cnt[m.name] = (cnt[m.name]||0)+1 }
-        })
-      })
-      return out
+
+    // Build per-slot CAP from staffing requirements: cap[d][m] = max workers concurrently allowed
+    const SLOT = 15
+    const cap = DAYS.map(()=>({}))
+    staffingReqs.forEach(req=>{
+      const sM = toMins(req.start_time), eM = toMins(req.end_time)
+      for(let m=sM; m<eM; m+=SLOT){
+        cap[req.day_index][m] = Math.max(cap[req.day_index][m]||0, req.min_workers||0)
+      }
     })
+    // Track current count[d][m]
+    const count = DAYS.map(()=>({}))
+
+    const byDay = DAYS.map(()=>[])
+    for(let di=0; di<7; di++){
+      const ds = daySettings[di] || {open_time:'08:30', close_time:'19:00'}
+      const oM = toMins(ds.open_time), cM = toMins(ds.close_time)
+      // Walk members; for each available slot, accept only the portions where cap not full
+      for(const m of members){
+        if(maxMap[m.name] && (cnt[m.name]||0) >= maxMap[m.name]) continue
+        const slots = (avail[m.name]||[]).filter(s=>s.day_index===di && s.on!==false)
+        for(const slot of slots){
+          const s = Math.max(toMins(slot.start), oM), e = Math.min(toMins(slot.end), cM)
+          if(e<=s) continue
+          // Build runs of "addable" slots
+          const runs = []
+          let runStart = null
+          for(let t=s; t<e; t+=SLOT){
+            const slotCap = cap[di][t] // undefined => unlimited
+            const cur = count[di][t] || 0
+            const canAdd = slotCap === undefined || cur < slotCap
+            if(canAdd){ if(runStart===null) runStart = t }
+            else { if(runStart!==null){ runs.push([runStart, t]); runStart = null } }
+          }
+          if(runStart!==null) runs.push([runStart, e])
+          // Materialize each run as a shift (skip < 30 min fragments)
+          for(const [rs, re] of runs){
+            if(re - rs < 30) continue
+            if(maxMap[m.name] && (cnt[m.name]||0) >= maxMap[m.name]) break
+            byDay[di].push({name:m.name, user_id:m.id, start_time:toTime(rs), end_time:toTime(re)})
+            cnt[m.name] = (cnt[m.name]||0)+1
+            for(let t=rs; t<re; t+=SLOT){ count[di][t] = (count[di][t]||0)+1 }
+          }
+        }
+      }
+    }
     const { data: sched, error: se } = await supabase.from('schedules')
       .upsert({ organization_id: orgId, week_offset: week, published: false }, { onConflict: 'organization_id,week_offset' })
       .select().single()
