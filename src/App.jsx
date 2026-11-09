@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from './lib/supabase'
-import { DAYS, toMins, toTime, weekLabel, weekRange,
+import { DAYS, toMins, weekLabel, weekRange,
          initials, nameColor, nameShiftColor,
          weekStartDate, addDaysISO } from './lib/utils'
 
@@ -18,8 +18,14 @@ import Login from './views/Login'
 import Onboarding from './views/Onboarding'
 import Organizations from './views/Organizations'
 import Personal from './views/Personal'
+import Team from './views/Team'
+import TemplatesEditor from './components/TemplatesEditor'
+import GenerationReport from './components/GenerationReport'
+import BusinessRules from './components/BusinessRules'
+import { RULE_PACKS, runGenerator, checkWeek, weekToEngineShifts, toSavePayload } from './lib/engineAdapter'
 
 const PERSONAL_ORG = { id: '__personal__', name: 'Personal' }
+const CURRENCY_SYMBOL = { EUR:'€', CAD:'$', USD:'$', GBP:'£' }
 const RULE_LABELS = {
   cant_be_alone: "can't be alone",
   cant_work_with: "can't work with",
@@ -42,7 +48,6 @@ export default function App(){
   const [editSh,       setEditSh]       = useState(null)
   const [assignModal,  setAssignModal]  = useState(null)
   const [toast,        setToast]        = useState(null)
-  const [newReq,       setNewReq]       = useState({day_index:0,start_time:'08:30',end_time:'13:00',min_workers:2,label:'Morning'})
   const [genLoading,   setGenLoading]   = useState(false)
 
   // Org-scoped data
@@ -51,7 +56,13 @@ export default function App(){
   const [members,      setMembers]      = useState([])
   const [weekAvail,    setWeekAvail]    = useState({})
   const [weekSchedules,setWeekSchedules]= useState({})
-  const [staffingReqs, setStaffingReqs] = useState([])
+  const [staffingReqs, setStaffingReqs] = useState([])   // templates mapped to the old requirement shape (used by ScheduleView)
+  const [templates,    setTemplates]    = useState([])
+  const [jobRoles,     setJobRoles]     = useState([])
+  const [timeOff,      setTimeOff]      = useState([])
+  const [orgSettings,  setOrgSettings]  = useState(null)
+  const [genReports,   setGenReports]   = useState({})   // week offset → last generation report
+  const [fillGapsOnly, setFillGapsOnly] = useState(false)
 
   const showToast = useCallback(msg=>{
     setToast(msg)
@@ -67,6 +78,19 @@ export default function App(){
   const axisE = Math.max(...allM.map(x=>x.c).filter(Boolean), 1140)
   const memberName = id => members.find(m=>m.id===id)?.name || 'Unknown'
   const cannotAlone = rules.filter(r=>r.kind==='cant_be_alone').map(r=>memberName(r.member_id))
+  // Live rule check of the week on screen — catches problems from manual edits too.
+  const weekIssues = useMemo(() => {
+    const cur = weekSchedules[week]
+    if(!cur || !orgSettings) return []
+    try {
+      const availRows = Object.values(weekAvail[week] || {}).flat()
+        .filter(r => r.user_id)
+        .map(r => ({ user_id: r.user_id, day_index: r.day_index, start_time: r.start, end_time: r.end, is_available: r.on !== false }))
+      return checkWeek({ org: orgSettings, members, templates, availRows, timeOff, rules, daySettings, weekStart: cur.period_start }, cur)
+        // Only flag "not available" for people who actually submitted availability this week.
+        .filter(v => v.code !== 'unavailable' || availRows.some(a => a.user_id === v.memberId))
+    } catch(e) { console.error(e); return [] }
+  }, [weekSchedules, week, orgSettings, members, templates, weekAvail, timeOff, rules, daySettings])
 
   // ── AUTH ──
   useEffect(()=>{
@@ -144,18 +168,39 @@ export default function App(){
   }, [orgId])
 
   async function loadOrgData(oid){
-    const [mem, con, ds, sr] = await Promise.all([
-      supabase.from('organization_members').select('role, profiles:user_id(id, name)').eq('organization_id', oid),
+    const [mem, con, ds, tpl, roles, mroles, pay, org, toff] = await Promise.all([
+      supabase.from('organization_members').select('role, target_hours, max_hours, senior, contract_type, profiles:user_id(id, name)').eq('organization_id', oid),
       supabase.from('rules').select('*').eq('organization_id', oid).order('created_at'),
       supabase.from('day_settings').select('*').eq('organization_id', oid).order('day_index'),
-      supabase.from('staffing_requirements').select('*').eq('organization_id', oid).order('day_index').order('start_time')
+      supabase.from('shift_templates').select('*').eq('organization_id', oid).order('weekday').order('start_time'),
+      supabase.from('job_roles').select('*').eq('organization_id', oid).order('name'),
+      supabase.from('member_roles').select('user_id, role_id').eq('organization_id', oid),
+      supabase.from('member_pay').select('user_id, hourly_rate').eq('organization_id', oid),
+      supabase.from('organizations').select('*').eq('id', oid).single(),
+      supabase.from('time_off').select('*').eq('organization_id', oid),
     ])
-    if(mem.data) setMembers(mem.data.map(r => ({ ...r.profiles, role: r.role })))
+    const rolesByUser = {}
+    ;(mroles.data || []).forEach(r => { (rolesByUser[r.user_id] ||= []).push(r.role_id) })
+    const payByUser = Object.fromEntries((pay.data || []).map(p => [p.user_id, p.hourly_rate]))
+    if(mem.data) setMembers(mem.data.filter(r => r.profiles).map(r => ({
+      ...r.profiles, role: r.role, target_hours: r.target_hours, max_hours: r.max_hours,
+      senior: r.senior, contract_type: r.contract_type,
+      roleIds: rolesByUser[r.profiles.id] || [], hourly_rate: payByUser[r.profiles.id] ?? null,
+    })))
     if(con.data) setRules(con.data)
     if(ds.data && ds.data.length===7) setDaySettings(ds.data)
     else setDaySettings(DAYS.map(()=>({open_time:'08:30', close_time:'19:00'})))
-    if(sr.data) setStaffingReqs(sr.data)
-    else setStaffingReqs([])
+    applyTemplates(tpl.data || [])
+    setJobRoles(roles.data || [])
+    setOrgSettings(org.data || null)
+    setTimeOff(toff.data || [])
+  }
+  function applyTemplates(list){
+    setTemplates(list)
+    setStaffingReqs(list.map(t => ({
+      id: t.id, day_index: t.weekday, start_time: t.start_time, end_time: t.end_time,
+      min_workers: t.min_workers, label: t.name,
+    })))
   }
 
   // Pick default view when org context changes
@@ -166,7 +211,7 @@ export default function App(){
     if(currentOrg){
       setView(prev => {
         const valid = currentOrg.role==='admin'
-          ? ['timetable','history','availability','constraints','settings']
+          ? ['timetable','history','availability','constraints','team','settings']
           : ['my-availability','my-shifts','my-history']
         if(prev && valid.includes(prev)) return prev
         return currentOrg.role==='admin' ? 'timetable' : 'my-availability'
@@ -195,7 +240,7 @@ export default function App(){
       data.forEach(r=>{
         const name = r.profiles?.name || 'Unknown'
         if(!byPerson[name]) byPerson[name] = []
-        byPerson[name].push({slot_index:r.slot_index, day_index:r.day_index, on:r.is_available, start:r.start_time, end:r.end_time, id:r.id})
+        byPerson[name].push({slot_index:r.slot_index, day_index:r.day_index, on:r.is_available, start:r.start_time, end:r.end_time, id:r.id, user_id:r.user_id})
       })
       setWeekAvail(prev=>({...prev, [w]: byPerson}))
       return byPerson
@@ -272,6 +317,12 @@ export default function App(){
   }
 
   // ── SCHEDULES ──
+  async function loadLatestRun(w, scheduleId){
+    const { data } = await supabase.from('schedule_runs').select('*')
+      .eq('schedule_id', scheduleId).order('created_at', { ascending:false }).limit(1).maybeSingle()
+    if(data?.explanations) setGenReports(prev => ({ ...prev, [w]: data.explanations }))
+  }
+
   async function loadSchedule(w, force = false){
     if(!orgId) return
     if(weekSchedules[w] && !force) return
@@ -290,80 +341,141 @@ export default function App(){
       const byDay = DAYS.map(()=>[])
       if(shifts) shifts.forEach(s => byDay[s.day_index]?.push({...s, name: s.user_id ? (s.profiles?.name || 'Unknown') : 'Open shift'}))
       setWeekSchedules(prev=>({...prev, [w]: {...sched, shifts: byDay}}))
+      loadLatestRun(w, sched.id)
     }
+  }
+
+  // Hours each person worked in the 4 weeks before this one (for fairness over time).
+  async function loadHistoryHours(ws){
+    const from = addDaysISO(ws, -28), to = addDaysISO(ws, -1)
+    const { data } = await supabase.from('shifts')
+      .select('user_id, start_time, end_time, break_minutes, date, schedules!inner(organization_id)')
+      .eq('schedules.organization_id', orgId).gte('date', from).lte('date', to)
+    const out = {}
+    ;(data || []).forEach(s => {
+      if(!s.user_id) return
+      let m = toMins(s.end_time) - toMins(s.start_time); if(m <= 0) m += 1440
+      out[s.user_id] = (out[s.user_id] || 0) + (m - (s.break_minutes || 0)) / 60
+    })
+    return out
   }
 
   async function genSchedule(){
     if(!orgId) return
+    if(!templates.length){ showToast('Add shift templates in Settings first'); return }
     setGenLoading(true)
-    // Use the freshly loaded availability, not React state (which updates on the next render).
-    const avail = await loadAvail(week)
-    const maxMap = {}
-    rules.filter(r=>r.kind==='max_shifts_week' && r.params?.max).forEach(r => { maxMap[r.member_id] = parseInt(r.params.max) || 99 })
-    const cnt = {}
+    try {
+      const ws = weekStartDate(week)
+      const [{ data: availRows }, historyHours, { data: sched, error: se }] = await Promise.all([
+        supabase.from('availability').select('*').eq('organization_id', orgId).eq('week_start', ws),
+        loadHistoryHours(ws),
+        supabase.rpc('ensure_week_schedule', { p_org: orgId, p_week_start: ws }),
+      ])
+      if(se || !sched?.id) throw new Error(se?.message || 'could not create schedule')
 
-    // Build per-slot CAP from staffing requirements: cap[d][m] = max workers concurrently allowed
-    // (Phase 1 keeps the existing generator; Phase 2 replaces it with the new engine.)
-    const SLOT = 15
-    const cap = DAYS.map(()=>({}))
-    staffingReqs.forEach(req=>{
-      const sM = toMins(req.start_time), eM = toMins(req.end_time)
-      for(let m=sM; m<eM; m+=SLOT){
-        cap[req.day_index][m] = Math.max(cap[req.day_index][m]||0, req.min_workers||0)
+      // Keep pinned shifts — or everything already assigned, in "fill gaps only" mode.
+      const existing = weekToEngineShifts(weekSchedules[week])
+      const lockedShifts = existing.filter(s => s.memberId && (fillGapsOnly || s.locked))
+        .map(s => ({ ...s, locked: true }))
+
+      const { result, durationMs } = runGenerator({
+        org: orgSettings, members, templates, availRows, timeOff, rules, daySettings,
+        weekStart: ws, lockedShifts, historyHours, seed: (sched.version || 1) * 7919 + week,
+      })
+      const toSave = result.shifts.map(s => ({ ...s, locked: lockedShifts.some(l => l.id === s.id) }))
+      const { error: saveErr } = await supabase.rpc('save_schedule', {
+        p_schedule_id: sched.id, p_shifts: toSavePayload(toSave), p_expected_version: sched.version,
+      })
+      if(saveErr) throw new Error(saveErr.message?.includes('stale_version')
+        ? 'Someone else just changed this schedule — reload and try again' : saveErr.message)
+
+      const report = {
+        preset: orgSettings?.generation_preset || 'balanced',
+        score: result.score, members: result.members, violations: result.violations,
+        unfilled: result.unfilled.map(u => ({ slot: u.slot, summary: u.summary })),
       }
-    })
-    const count = DAYS.map(()=>({}))
-
-    const byDay = DAYS.map(()=>[])
-    for(let di=0; di<7; di++){
-      const ds = daySettings[di] || {open_time:'08:30', close_time:'19:00'}
-      const oM = toMins(ds.open_time), cM = toMins(ds.close_time)
-      for(const m of members){
-        if(maxMap[m.id] && (cnt[m.id]||0) >= maxMap[m.id]) continue
-        const slots = (avail[m.name]||[]).filter(s=>s.day_index===di && s.on!==false)
-        for(const slot of slots){
-          const s = Math.max(toMins(slot.start), oM), e = Math.min(toMins(slot.end), cM)
-          if(e<=s) continue
-          const runs = []
-          let runStart = null
-          for(let t=s; t<e; t+=SLOT){
-            const slotCap = cap[di][t] // undefined => unlimited
-            const cur = count[di][t] || 0
-            const canAdd = slotCap === undefined || cur < slotCap
-            if(canAdd){ if(runStart===null) runStart = t }
-            else { if(runStart!==null){ runs.push([runStart, t]); runStart = null } }
-          }
-          if(runStart!==null) runs.push([runStart, e])
-          for(const [rs, re] of runs){
-            if(re - rs < 30) continue
-            if(maxMap[m.id] && (cnt[m.id]||0) >= maxMap[m.id]) break
-            byDay[di].push({name:m.name, user_id:m.id, start_time:toTime(rs), end_time:toTime(re)})
-            cnt[m.id] = (cnt[m.id]||0)+1
-            for(let t=rs; t<re; t+=SLOT){ count[di][t] = (count[di][t]||0)+1 }
-          }
-        }
-      }
+      setGenReports(prev => ({ ...prev, [week]: report }))
+      await supabase.from('schedule_runs').insert({
+        schedule_id: sched.id, engine_version: result.engineVersion, seed: result.seed,
+        score: result.score.total, duration_ms: durationMs, created_by: profile.id,
+        result: { members: result.members, iterations: result.iterations }, explanations: report,
+      })
+      await loadSchedule(week, true)
+      const gaps = result.unfilled.filter(u => u.slot.mandatory).length
+      showToast(gaps ? `Generated — ${gaps} shift${gaps>1?'s':''} couldn't be filled` : 'Schedule generated!')
+    } catch(e) {
+      showToast('Error: ' + e.message)
+    } finally {
+      setGenLoading(false)
     }
+  }
 
-    // Save atomically: get-or-create the week, then replace all its shifts in one transaction.
-    const ws = weekStartDate(week)
-    const { data: sched, error: se } = await supabase.rpc('ensure_week_schedule', { p_org: orgId, p_week_start: ws })
-    if(se || !sched?.id){ showToast('Error: '+(se?.message || 'could not create schedule')); setGenLoading(false); return }
-    const payload = byDay.flatMap((day, di)=>day.map(s=>({
-      user_id: s.user_id, date: addDaysISO(ws, di), start_time: s.start_time, end_time: s.end_time
-    })))
-    const { error: saveErr } = await supabase.rpc('save_schedule', {
-      p_schedule_id: sched.id, p_shifts: payload, p_expected_version: sched.version
+  async function toggleLock(di, idx){
+    const shift = weekSchedules[week].shifts[di][idx]
+    const locked = !shift.locked
+    const { error } = await supabase.from('shifts').update({ locked }).eq('id', shift.id)
+    if(error){ showToast('Error: ' + error.message); return }
+    setWeekSchedules(prev => {
+      const next = JSON.parse(JSON.stringify(prev))
+      next[week].shifts[di][idx].locked = locked
+      return next
     })
-    if(saveErr){
-      showToast(saveErr.message?.includes('stale_version')
-        ? 'Someone else just changed this schedule — reload and try again'
-        : 'Error: '+saveErr.message)
-      setGenLoading(false); return
-    }
-    await loadSchedule(week, true)
-    setGenLoading(false)
-    showToast('Schedule generated!')
+    showToast(locked ? 'Shift locked — regenerating keeps it' : 'Shift unlocked')
+  }
+
+  // ── Templates, roles, team, business rules ──
+  async function addTemplates(rows){
+    const { data, error } = await supabase.from('shift_templates')
+      .insert(rows.map(r => ({ ...r, organization_id: orgId }))).select()
+    if(error){ showToast('Error: ' + error.message); return }
+    applyTemplates([...templates, ...data])
+    showToast(rows.length > 1 ? `${rows.length} templates added` : 'Template added')
+  }
+  async function deleteTemplate(id){
+    await supabase.from('shift_templates').delete().eq('id', id)
+    applyTemplates(templates.filter(t => t.id !== id))
+  }
+  async function addJobRole(name){
+    const { data, error } = await supabase.from('job_roles').insert({ organization_id: orgId, name }).select().single()
+    if(error){ showToast('Error: ' + error.message); return }
+    setJobRoles(prev => [...prev, data])
+  }
+  async function deleteJobRole(id){
+    await supabase.from('job_roles').delete().eq('id', id)
+    setJobRoles(prev => prev.filter(r => r.id !== id))
+    setMembers(prev => prev.map(m => ({ ...m, roleIds: (m.roleIds || []).filter(r => r !== id) })))
+  }
+  async function toggleMemberRole(member, roleId, on){
+    const q = on
+      ? supabase.from('member_roles').insert({ organization_id: orgId, user_id: member.id, role_id: roleId })
+      : supabase.from('member_roles').delete().eq('user_id', member.id).eq('role_id', roleId)
+    const { error } = await q
+    if(error){ showToast('Error: ' + error.message); return }
+    setMembers(prev => prev.map(m => m.id !== member.id ? m : { ...m, roleIds: on ? [...(m.roleIds||[]), roleId] : (m.roleIds||[]).filter(r => r !== roleId) }))
+  }
+  async function saveMember(member, d){
+    const num = v => (v === '' || v == null ? null : Number(v))
+    const { error } = await supabase.from('organization_members').update({
+      target_hours: num(d.target_hours), max_hours: num(d.max_hours), senior: !!d.senior, contract_type: d.contract_type || null,
+    }).eq('organization_id', orgId).eq('user_id', member.id)
+    if(error){ showToast('Error: ' + error.message); return false }
+    const rate = num(d.hourly_rate)
+    const payRes = rate == null
+      ? await supabase.from('member_pay').delete().eq('organization_id', orgId).eq('user_id', member.id)
+      : await supabase.from('member_pay').upsert({ organization_id: orgId, user_id: member.id, hourly_rate: rate, updated_at: new Date().toISOString() })
+    if(payRes.error){ showToast('Error: ' + payRes.error.message); return false }
+    setMembers(prev => prev.map(m => m.id !== member.id ? m : {
+      ...m, target_hours: num(d.target_hours), max_hours: num(d.max_hours), senior: !!d.senior,
+      contract_type: d.contract_type || null, hourly_rate: rate,
+    }))
+    showToast(`${member.name} saved`)
+    return true
+  }
+  async function saveOrgSettings(patch){
+    const { data, error } = await supabase.from('organizations').update(patch).eq('id', orgId).select().single()
+    if(error){ showToast('Error: ' + error.message); return }
+    setOrgSettings(data)
+    showToast('Settings saved')
   }
 
   async function submitForApproval(){
@@ -496,15 +608,6 @@ export default function App(){
     return issues
   }
 
-  async function saveStaffingReq(){
-    const { data } = await supabase.from('staffing_requirements')
-      .insert({...newReq, organization_id: orgId}).select().single()
-    if(data){ setStaffingReqs(prev=>[...prev, data]); showToast('Requirement added') }
-  }
-  async function deleteStaffingReq(id){
-    await supabase.from('staffing_requirements').delete().eq('id', id)
-    setStaffingReqs(prev=>prev.filter(r=>r.id!==id))
-  }
   async function saveDaySettings(){
     const rows = daySettings.map((d,i)=>({
       organization_id: orgId, week_offset:0, day_index:i,
@@ -560,6 +663,7 @@ export default function App(){
     ['history','History'],
     ['availability','Availability'],
     ['constraints','Constraints'],
+    ['team','Team'],
     ['settings','Settings'],
   ]
   const memberTabs = [
@@ -576,6 +680,7 @@ export default function App(){
   else tabs = isAdmin ? adminTabs : memberTabs
 
   const ws = weekSchedules[week]
+  const currency = CURRENCY_SYMBOL[orgSettings?.currency] || '€'
 
   return(
     <div>
@@ -621,6 +726,11 @@ export default function App(){
               </div>
               <div className="modal-field"><div className="modal-label">Start</div><input type="time" id="es" defaultValue={sh.start_time} step="900"/></div>
               <div className="modal-field"><div className="modal-label">End</div><input type="time" id="ee" defaultValue={sh.end_time} step="900"/></div>
+              {sh.break_minutes > 0 && <p className="muted" style={{fontSize:'12px'}}>Includes a {sh.break_minutes}-min break.</p>}
+              <label style={{fontSize:'12px', display:'flex', alignItems:'center', gap:'6px', margin:'6px 0'}}>
+                <input type="checkbox" checked={!!sh.locked} onChange={()=>toggleLock(editSh.di, editSh.idx)}/>
+                Locked — keep this shift when regenerating
+              </label>
               <div className="row" style={{marginTop:'8px'}}>
                 <button className="btn btn-teal" onClick={()=>saveShiftEdit(editSh.di, editSh.idx)}>Save</button>
                 <button className="btn btn-red" onClick={()=>removeShiftDB(editSh.di, editSh.idx)}>Remove</button>
@@ -669,8 +779,11 @@ export default function App(){
             </div>
             {week>=0 && (
               <div className="row">
+                {ws && <label style={{fontSize:'12px', display:'flex', alignItems:'center', gap:'4px'}} title="Keep everything already assigned and only fill what's missing">
+                  <input type="checkbox" checked={fillGapsOnly} onChange={e=>setFillGapsOnly(e.target.checked)}/> Fill gaps only
+                </label>}
                 <button className="btn btn-blue" onClick={genSchedule} disabled={genLoading}>
-                  {genLoading ? 'Generating…' : 'Generate'}
+                  {genLoading ? 'Generating…' : ws ? 'Regenerate' : 'Generate'}
                 </button>
                 {ws && !ws.published && !ws.pending_approval && <button className="btn btn-teal" onClick={submitForApproval}>Submit for approval</button>}
                 {ws?.pending_approval && !ws.published && <>
@@ -713,10 +826,14 @@ export default function App(){
             ) : (
               <EmptyState
                 title="No schedule yet"
-                body='Click "Generate" above to build a schedule from team availability.'
+                body={templates.length ? 'Click "Generate" above to build a schedule from your shift templates and team availability.' : 'Add your usual shifts under Settings → Shift templates, then click "Generate".'}
               />
             )}
           </div>
+          {ws && week>=0 && (
+            <GenerationReport report={genReports[week]} issues={weekIssues} members={members}
+              currency={currency} weekStart={ws.period_start}/>
+          )}
         </div>
       )}
 
@@ -910,33 +1027,15 @@ export default function App(){
             ))}
             <button className="btn btn-teal" style={{marginTop:'12px'}} onClick={saveDaySettings}>Save hours</button>
           </div>
-          <div className="card">
-            <div className="card-label">Staffing requirements</div>
-            {staffingReqs.length===0 && <p className="muted" style={{marginBottom:'8px'}}>No requirements yet.</p>}
-            {staffingReqs.map(r=>(
-              <div key={r.id} className="req-row">
-                <span style={{fontSize:'12px',fontWeight:500,minWidth:'32px'}}>{DAYS[r.day_index]}</span>
-                <span style={{fontSize:'12px',color:'#888'}}>{r.label}</span>
-                <span style={{fontSize:'12px'}}>{r.start_time}–{r.end_time}</span>
-                <span className="pill pill-blue">{r.min_workers} min</span>
-                <button className="btn btn-red btn-sm" style={{marginLeft:'auto'}} onClick={()=>deleteStaffingReq(r.id)}>Remove</button>
-              </div>
-            ))}
-            <div className="add-req">
-              <div className="card-label" style={{marginBottom:'8px'}}>Add requirement</div>
-              <div className="row" style={{flexWrap:'wrap',gap:'6px'}}>
-                <select value={newReq.day_index} onChange={e=>setNewReq(p=>({...p,day_index:parseInt(e.target.value)}))}>
-                  {DAYS.map((d,i)=><option key={i} value={i}>{d}</option>)}
-                </select>
-                <input placeholder="Label" value={newReq.label} style={{width:'120px'}} onChange={e=>setNewReq(p=>({...p,label:e.target.value}))}/>
-                <input type="time" value={newReq.start_time} step="900" onChange={e=>setNewReq(p=>({...p,start_time:e.target.value}))}/>
-                <input type="time" value={newReq.end_time} step="900" onChange={e=>setNewReq(p=>({...p,end_time:e.target.value}))}/>
-                <input type="number" min="1" max="20" value={newReq.min_workers} style={{width:'58px'}} onChange={e=>setNewReq(p=>({...p,min_workers:parseInt(e.target.value)||1}))}/>
-                <button className="btn btn-blue" onClick={saveStaffingReq}>Add</button>
-              </div>
-            </div>
-          </div>
+          <TemplatesEditor templates={templates} roles={jobRoles} onAdd={addTemplates} onDelete={deleteTemplate}/>
+          {orgSettings && <BusinessRules key={orgSettings.id} org={orgSettings} rulePacks={RULE_PACKS} onSave={saveOrgSettings}/>}
         </div>
+      )}
+
+      {/* TEAM */}
+      {!isPersonalView && !isOrgsView && view==='team' && (
+        <Team members={members} roles={jobRoles} currency={currency}
+          onSaveMember={saveMember} onAddRole={addJobRole} onDeleteRole={deleteJobRole} onToggleRole={toggleMemberRole}/>
       )}
 
       {/* MY AVAILABILITY */}
