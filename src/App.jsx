@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from './lib/supabase'
-import { DAYS, CTYPES, toMins, toTime, weekLabel, weekRange,
-         initials, nameColor, nameShiftColor } from './lib/utils'
+import { DAYS, toMins, toTime, weekLabel, weekRange,
+         initials, nameColor, nameShiftColor,
+         weekStartDate, addDaysISO } from './lib/utils'
 
 import Toast from './components/Toast'
 import WeekNav from './components/WeekNav'
@@ -19,6 +20,12 @@ import Organizations from './views/Organizations'
 import Personal from './views/Personal'
 
 const PERSONAL_ORG = { id: '__personal__', name: 'Personal' }
+const RULE_LABELS = {
+  cant_be_alone: "can't be alone",
+  cant_work_with: "can't work with",
+  max_shifts_week: 'max shifts/week',
+  required_on_shift: 'required on shift',
+}
 
 export default function App(){
   const [authReady,    setAuthReady]    = useState(false)
@@ -40,7 +47,7 @@ export default function App(){
 
   // Org-scoped data
   const [daySettings,  setDaySettings]  = useState(DAYS.map(()=>({open_time:'08:30',close_time:'19:00'})))
-  const [constraints,  setConstraints]  = useState([])
+  const [rules,        setRules]        = useState([])   // rows from public.rules
   const [members,      setMembers]      = useState([])
   const [weekAvail,    setWeekAvail]    = useState({})
   const [weekSchedules,setWeekSchedules]= useState({})
@@ -58,7 +65,8 @@ export default function App(){
   const allM = daySettings.map(d=>({o:toMins(d.open_time), c:toMins(d.close_time)}))
   const axisS = Math.min(...allM.map(x=>x.o).filter(Boolean), 510)
   const axisE = Math.max(...allM.map(x=>x.c).filter(Boolean), 1140)
-  const cannotAlone = constraints.filter(c=>c.type==="can't be alone").map(c=>c.person)
+  const memberName = id => members.find(m=>m.id===id)?.name || 'Unknown'
+  const cannotAlone = rules.filter(r=>r.kind==='cant_be_alone').map(r=>memberName(r.member_id))
 
   // ── AUTH ──
   useEffect(()=>{
@@ -138,12 +146,12 @@ export default function App(){
   async function loadOrgData(oid){
     const [mem, con, ds, sr] = await Promise.all([
       supabase.from('organization_members').select('role, profiles:user_id(id, name)').eq('organization_id', oid),
-      supabase.from('constraints').select('*').eq('organization_id', oid),
+      supabase.from('rules').select('*').eq('organization_id', oid).order('created_at'),
       supabase.from('day_settings').select('*').eq('organization_id', oid).order('day_index'),
       supabase.from('staffing_requirements').select('*').eq('organization_id', oid).order('day_index').order('start_time')
     ])
     if(mem.data) setMembers(mem.data.map(r => ({ ...r.profiles, role: r.role })))
-    if(con.data) setConstraints(con.data)
+    if(con.data) setRules(con.data)
     if(ds.data && ds.data.length===7) setDaySettings(ds.data)
     else setDaySettings(DAYS.map(()=>({open_time:'08:30', close_time:'19:00'})))
     if(sr.data) setStaffingReqs(sr.data)
@@ -181,7 +189,7 @@ export default function App(){
       .from('availability')
       .select('*, profiles:user_id(name)')
       .eq('organization_id', orgId)
-      .eq('week_offset', w)
+      .eq('week_start', weekStartDate(w))
     if(data){
       const byPerson = {}
       data.forEach(r=>{
@@ -190,7 +198,9 @@ export default function App(){
         byPerson[name].push({slot_index:r.slot_index, day_index:r.day_index, on:r.is_available, start:r.start_time, end:r.end_time, id:r.id})
       })
       setWeekAvail(prev=>({...prev, [w]: byPerson}))
+      return byPerson
     }
+    return {}
   }
 
   function getSlots(w, name, di){
@@ -239,7 +249,7 @@ export default function App(){
       .delete()
       .eq('organization_id', orgId)
       .eq('user_id', profile.id)
-      .eq('week_offset', w)
+      .eq('week_start', weekStartDate(w))
     if(delErr){ showToast('Error: '+delErr.message); return }
 
     if(!cells || cells.size === 0){
@@ -251,7 +261,7 @@ export default function App(){
 
     const ranges = cellsToRanges(cells)
     const rows = ranges.map(r => ({
-      organization_id: orgId, user_id: profile.id, week_offset: w,
+      organization_id: orgId, user_id: profile.id, week_start: weekStartDate(w),
       day_index: r.day_index, slot_index: r.slot_index,
       is_available: true, start_time: r.start, end_time: r.end
     }))
@@ -262,14 +272,15 @@ export default function App(){
   }
 
   // ── SCHEDULES ──
-  async function loadSchedule(w){
+  async function loadSchedule(w, force = false){
     if(!orgId) return
-    if(weekSchedules[w]) return
+    if(weekSchedules[w] && !force) return
     const { data: sched } = await supabase
       .from('schedules')
       .select('*')
       .eq('organization_id', orgId)
-      .eq('week_offset', w)
+      .eq('kind', 'week')
+      .eq('period_start', weekStartDate(w))
       .maybeSingle()
     if(sched){
       const { data: shifts } = await supabase
@@ -277,7 +288,7 @@ export default function App(){
         .select('*, profiles:user_id(name)')
         .eq('schedule_id', sched.id)
       const byDay = DAYS.map(()=>[])
-      if(shifts) shifts.forEach(s => byDay[s.day_index].push({...s, name: s.profiles?.name || 'Unknown'}))
+      if(shifts) shifts.forEach(s => byDay[s.day_index]?.push({...s, name: s.user_id ? (s.profiles?.name || 'Unknown') : 'Open shift'}))
       setWeekSchedules(prev=>({...prev, [w]: {...sched, shifts: byDay}}))
     }
   }
@@ -285,13 +296,14 @@ export default function App(){
   async function genSchedule(){
     if(!orgId) return
     setGenLoading(true)
-    await loadAvail(week)
-    const avail = weekAvail[week]||{}
+    // Use the freshly loaded availability, not React state (which updates on the next render).
+    const avail = await loadAvail(week)
     const maxMap = {}
-    constraints.filter(c=>c.type==='max shifts/week').forEach(c => maxMap[c.person] = parseInt(c.detail)||99)
+    rules.filter(r=>r.kind==='max_shifts_week' && r.params?.max).forEach(r => { maxMap[r.member_id] = parseInt(r.params.max) || 99 })
     const cnt = {}
 
     // Build per-slot CAP from staffing requirements: cap[d][m] = max workers concurrently allowed
+    // (Phase 1 keeps the existing generator; Phase 2 replaces it with the new engine.)
     const SLOT = 15
     const cap = DAYS.map(()=>({}))
     staffingReqs.forEach(req=>{
@@ -300,21 +312,18 @@ export default function App(){
         cap[req.day_index][m] = Math.max(cap[req.day_index][m]||0, req.min_workers||0)
       }
     })
-    // Track current count[d][m]
     const count = DAYS.map(()=>({}))
 
     const byDay = DAYS.map(()=>[])
     for(let di=0; di<7; di++){
       const ds = daySettings[di] || {open_time:'08:30', close_time:'19:00'}
       const oM = toMins(ds.open_time), cM = toMins(ds.close_time)
-      // Walk members; for each available slot, accept only the portions where cap not full
       for(const m of members){
-        if(maxMap[m.name] && (cnt[m.name]||0) >= maxMap[m.name]) continue
+        if(maxMap[m.id] && (cnt[m.id]||0) >= maxMap[m.id]) continue
         const slots = (avail[m.name]||[]).filter(s=>s.day_index===di && s.on!==false)
         for(const slot of slots){
           const s = Math.max(toMins(slot.start), oM), e = Math.min(toMins(slot.end), cM)
           if(e<=s) continue
-          // Build runs of "addable" slots
           const runs = []
           let runStart = null
           for(let t=s; t<e; t+=SLOT){
@@ -325,28 +334,34 @@ export default function App(){
             else { if(runStart!==null){ runs.push([runStart, t]); runStart = null } }
           }
           if(runStart!==null) runs.push([runStart, e])
-          // Materialize each run as a shift (skip < 30 min fragments)
           for(const [rs, re] of runs){
             if(re - rs < 30) continue
-            if(maxMap[m.name] && (cnt[m.name]||0) >= maxMap[m.name]) break
+            if(maxMap[m.id] && (cnt[m.id]||0) >= maxMap[m.id]) break
             byDay[di].push({name:m.name, user_id:m.id, start_time:toTime(rs), end_time:toTime(re)})
-            cnt[m.name] = (cnt[m.name]||0)+1
+            cnt[m.id] = (cnt[m.id]||0)+1
             for(let t=rs; t<re; t+=SLOT){ count[di][t] = (count[di][t]||0)+1 }
           }
         }
       }
     }
-    const { data: sched, error: se } = await supabase.from('schedules')
-      .upsert({ organization_id: orgId, week_offset: week, published: false }, { onConflict: 'organization_id,week_offset' })
-      .select().single()
-    if(se){ showToast('Error: '+se.message); setGenLoading(false); return }
-    await supabase.from('shifts').delete().eq('schedule_id', sched.id)
-    const shiftRows = byDay.flatMap((day, di)=>day.map(s=>({
-      schedule_id: sched.id, user_id: s.user_id, day_index: di,
-      start_time: s.start_time, end_time: s.end_time
+
+    // Save atomically: get-or-create the week, then replace all its shifts in one transaction.
+    const ws = weekStartDate(week)
+    const { data: sched, error: se } = await supabase.rpc('ensure_week_schedule', { p_org: orgId, p_week_start: ws })
+    if(se || !sched?.id){ showToast('Error: '+(se?.message || 'could not create schedule')); setGenLoading(false); return }
+    const payload = byDay.flatMap((day, di)=>day.map(s=>({
+      user_id: s.user_id, date: addDaysISO(ws, di), start_time: s.start_time, end_time: s.end_time
     })))
-    if(shiftRows.length) await supabase.from('shifts').insert(shiftRows)
-    setWeekSchedules(prev=>({...prev, [week]: {...sched, shifts: byDay}}))
+    const { error: saveErr } = await supabase.rpc('save_schedule', {
+      p_schedule_id: sched.id, p_shifts: payload, p_expected_version: sched.version
+    })
+    if(saveErr){
+      showToast(saveErr.message?.includes('stale_version')
+        ? 'Someone else just changed this schedule — reload and try again'
+        : 'Error: '+saveErr.message)
+      setGenLoading(false); return
+    }
+    await loadSchedule(week, true)
     setGenLoading(false)
     showToast('Schedule generated!')
   }
@@ -449,7 +464,7 @@ export default function App(){
     const end_time   = req?.end_time   || ds.close_time
     const { data } = await supabase.from('shifts').insert({
       schedule_id: ws.id, user_id: member.id, day_index: di,
-      start_time, end_time
+      date: addDaysISO(ws.period_start, di), start_time, end_time
     }).select('*, profiles:user_id(name)').single()
     if(data){
       setWeekSchedules(prev=>{
@@ -463,14 +478,19 @@ export default function App(){
     setAssignModal(null)
   }
 
+  // A requirement is met only if EVERY 15-min slot in its window has enough people
+  // (before, a 1-hour shift anywhere in a 9–17 window counted as covering it).
   function getUnderstaffed(shifts){
     const issues = []
     staffingReqs.forEach(req=>{
-      const dayShifts = shifts[req.day_index] || []
-      const covered = dayShifts.filter(sh =>
-        toMins(sh.start_time) < toMins(req.end_time) &&
-        toMins(sh.end_time) > toMins(req.start_time)
-      ).length
+      const dayShifts = (shifts[req.day_index] || []).filter(sh => sh.user_id)
+      const rs = toMins(req.start_time), re = toMins(req.end_time)
+      let covered = Infinity
+      for(let t = rs; t < re; t += 15){
+        const n = dayShifts.filter(sh => toMins(sh.start_time) <= t && toMins(sh.end_time) > t).length
+        covered = Math.min(covered, n)
+      }
+      if(covered === Infinity) covered = 0
       if(covered < req.min_workers) issues.push({...req, covered})
     })
     return issues
@@ -494,16 +514,28 @@ export default function App(){
     if(error) showToast('Error: '+error.message)
     else showToast('Hours saved')
   }
-  async function addConstraint(){
-    const type = document.getElementById('ctype').value
-    const person = document.getElementById('cperson').value
-    const detail = document.getElementById('cdetail').value
-    const { data } = await supabase.from('constraints').insert({type, person, detail, organization_id: orgId}).select().single()
-    if(data) setConstraints(prev=>[...prev, data])
+  const [ruleForm, setRuleForm] = useState({ kind: 'cant_be_alone', member_id: '', other_member_id: '', max: 3, weekday: 0, start: '08:00', end: '14:00' })
+  async function addRule(){
+    const member_id = ruleForm.member_id || members[0]?.id
+    if(!member_id) return
+    const row = { organization_id: orgId, kind: ruleForm.kind, member_id, params: {} }
+    if(ruleForm.kind === 'cant_work_with'){
+      const other = ruleForm.other_member_id || members.find(m=>m.id!==member_id)?.id
+      if(!other || other === member_id){ showToast('Pick two different people'); return }
+      row.other_member_id = other
+    }
+    if(ruleForm.kind === 'max_shifts_week') row.params = { max: Math.max(1, parseInt(ruleForm.max) || 1) }
+    if(ruleForm.kind === 'required_on_shift'){
+      if(toMins(ruleForm.end) <= toMins(ruleForm.start)){ showToast('End must be after start'); return }
+      row.params = { weekday: ruleForm.weekday, start: ruleForm.start, end: ruleForm.end }
+    }
+    const { data, error } = await supabase.from('rules').insert(row).select().single()
+    if(error){ showToast('Error: '+error.message); return }
+    setRules(prev=>[...prev, data])
   }
-  async function delConstraint(id){
-    await supabase.from('constraints').delete().eq('id', id)
-    setConstraints(prev=>prev.filter(c=>c.id!==id))
+  async function delRule(id){
+    await supabase.from('rules').delete().eq('id', id)
+    setRules(prev=>prev.filter(r=>r.id!==id))
   }
 
   function handleTimetableAction(action, di, data){
@@ -802,20 +834,46 @@ export default function App(){
           </div>
           <div className="card">
             <div className="card-label">Active rules</div>
-            {constraints.length===0 && <p className="muted">No constraints yet — add one below.</p>}
-            {constraints.map(c=>(
-              <div key={c.id} className="c-item">
-                <span className="pill pill-amber">{c.type}</span>
-                <span style={{fontSize:'13px',flex:1}}><strong>{c.person}</strong>{c.detail?` — ${c.detail}`:''}</span>
-                <button className="btn btn-red btn-sm" onClick={()=>delConstraint(c.id)}>Remove</button>
+            {rules.length===0 && <p className="muted">No constraints yet — add one below.</p>}
+            {rules.map(r=>(
+              <div key={r.id} className="c-item">
+                <span className="pill pill-amber">{RULE_LABELS[r.kind] || r.kind}</span>
+                <span style={{fontSize:'13px',flex:1}}>
+                  <strong>{memberName(r.member_id)}</strong>
+                  {r.kind==='cant_work_with' && <> — with <strong>{memberName(r.other_member_id)}</strong></>}
+                  {r.kind==='max_shifts_week' && <> — max {r.params?.max} shifts</>}
+                  {r.kind==='required_on_shift' && r.params?.weekday!=null && <> — {DAYS[r.params.weekday]} {r.params.start}–{r.params.end}</>}
+                  {r.kind==='required_on_shift' && r.params?.note && <> — {r.params.note}</>}
+                </span>
+                <button className="btn btn-red btn-sm" onClick={()=>delRule(r.id)}>Remove</button>
               </div>
             ))}
             <hr className="divider"/>
-            <div className="row">
-              <select id="cperson">{members.map(m=><option key={m.id}>{m.name}</option>)}</select>
-              <select id="ctype">{CTYPES.map(t=><option key={t}>{t}</option>)}</select>
-              <input id="cdetail" placeholder="detail (optional)" style={{minWidth:'120px',flex:1}}/>
-              <button className="btn btn-blue" onClick={addConstraint}>Add</button>
+            <div className="row" style={{flexWrap:'wrap'}}>
+              <select value={ruleForm.member_id || members[0]?.id || ''} onChange={e=>setRuleForm(f=>({...f, member_id:e.target.value}))}>
+                {members.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+              <select value={ruleForm.kind} onChange={e=>setRuleForm(f=>({...f, kind:e.target.value}))}>
+                {Object.entries(RULE_LABELS).map(([k,label])=><option key={k} value={k}>{label}</option>)}
+              </select>
+              {ruleForm.kind==='cant_work_with' && (
+                <select value={ruleForm.other_member_id} onChange={e=>setRuleForm(f=>({...f, other_member_id:e.target.value}))}>
+                  <option value="">with…</option>
+                  {members.filter(m=>m.id!==(ruleForm.member_id || members[0]?.id)).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+              )}
+              {ruleForm.kind==='max_shifts_week' && (
+                <input type="number" min="1" max="14" value={ruleForm.max} style={{width:'80px'}}
+                  onChange={e=>setRuleForm(f=>({...f, max:e.target.value}))}/>
+              )}
+              {ruleForm.kind==='required_on_shift' && (<>
+                <select value={ruleForm.weekday} onChange={e=>setRuleForm(f=>({...f, weekday:parseInt(e.target.value)}))}>
+                  {DAYS.map((d,i)=><option key={d} value={i}>{d}</option>)}
+                </select>
+                <input type="time" value={ruleForm.start} onChange={e=>setRuleForm(f=>({...f, start:e.target.value}))}/>
+                <input type="time" value={ruleForm.end} onChange={e=>setRuleForm(f=>({...f, end:e.target.value}))}/>
+              </>)}
+              <button className="btn btn-blue" onClick={addRule}>Add</button>
             </div>
           </div>
         </div>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { DAYS, ROW_H, toMins, weekLabel, weekRange, rangesOverlap } from '../lib/utils'
+import { DAYS, ROW_H, toMins, rangesOverlap, weekStartDate } from '../lib/utils'
 import WeekNav from '../components/WeekNav'
 import Modal from '../components/Modal'
 
@@ -35,9 +35,10 @@ export default function Personal({ profile, orgs }){
     if(orgIds.length){
       const { data: scheds } = await supabase
         .from('schedules')
-        .select('id, organization_id, week_offset, published')
+        .select('id, organization_id, period_start, published')
         .in('organization_id', orgIds)
-        .eq('week_offset', week)
+        .eq('kind', 'week')
+        .eq('period_start', weekStartDate(week))
       const schedIds = (scheds||[]).map(s=>s.id)
       if(schedIds.length){
         const { data: rows } = await supabase
@@ -70,7 +71,7 @@ export default function Personal({ profile, orgs }){
       .from('personal_events')
       .select('*')
       .eq('user_id', profile.id)
-      .eq('week_offset', week)
+      .eq('week_start', weekStartDate(week))
       .order('day_index')
       .order('start_time')
     setEvents(ev||[])
@@ -84,7 +85,7 @@ export default function Personal({ profile, orgs }){
     const fd = new FormData(e.target)
     const payload = {
       user_id: profile.id,
-      week_offset: week,
+      week_start: weekStartDate(week),
       day_index: parseInt(fd.get('day_index')),
       start_time: fd.get('start_time'),
       end_time: fd.get('end_time'),
