@@ -149,3 +149,126 @@ export interface ValidationResult {
   ok: boolean
   violations: Violation[]
 }
+
+// ───────────────────────── Generation (Phase 2) ─────────────────────────
+
+/** A recurring shift template: "Opening, Mon, 08:30–14:00, 1–2 people, barista". */
+export interface ShiftTemplate {
+  id: string
+  weekday: number // 0 = Monday … 6 = Sunday
+  name?: string
+  start: HHMM
+  end: HHMM // end <= start → ends next day
+  roleId?: string | null
+  /** People who MUST be found. */
+  min: number
+  /** People we'd like (>= min). */
+  target: number
+  breakMinutes?: number
+  kind?: ShiftKind
+}
+
+/** One-off dated demand, e.g. an event position. */
+export interface DatedDemand {
+  id: string
+  date: ISODate
+  start: HHMM
+  end: HHMM
+  roleId?: string | null
+  min: number
+  target: number
+  label?: string
+  breakMinutes?: number
+  kind?: ShiftKind
+}
+
+/** An open position the engine tries to fill: one per head. */
+export interface Slot {
+  id: string
+  date: ISODate
+  start: HHMM
+  end: HHMM
+  roleId: string | null
+  kind: ShiftKind
+  breakMinutes: number
+  mandatory: boolean
+  sourceId: string // template or demand id
+  label?: string
+}
+
+export type Preset = 'balanced' | 'cover_first' | 'save_money'
+
+export interface Weights {
+  coverage: number
+  fairness: number
+  preference: number
+  pattern: number
+  cost: number
+}
+
+export interface GenerateInput extends Omit<ScheduleInput, 'shifts'> {
+  templates?: ShiftTemplate[]
+  demand?: DatedDemand[]
+  /** Shifts the engine must keep exactly as they are (pinned by the manager, or "fill gaps only"). */
+  lockedShifts?: Shift[]
+  preset?: Preset
+  weights?: Partial<Weights>
+  seed?: number
+  /** Local-search iterations (deterministic; default scales with problem size). */
+  iterations?: number
+  /** Hours each member worked over the previous 4 weeks (for fairness over time). */
+  historyHours?: Record<string, number>
+  /** Weekly labour budget in the business's currency. */
+  laborBudget?: number | null
+}
+
+export type ReasonCode =
+  | 'unavailable' | 'time_off' | 'missing_role' | 'overlap' | 'min_rest'
+  | 'max_daily_hours' | 'max_weekly_hours' | 'contract_max_hours' | 'max_shifts_week'
+  | 'weekly_rest' | 'cant_work_with' | 'not_worth_cost' | 'feasible'
+
+export interface CandidateReason {
+  memberId: string
+  code: ReasonCode
+  message: string
+}
+
+export interface UnfilledSlot {
+  slot: Slot
+  summary: string
+  candidates: CandidateReason[]
+}
+
+export interface MemberSummary {
+  memberId: string
+  hours: number
+  target: number | null
+  fairTarget: number
+  shifts: number
+  cost: number | null
+}
+
+export interface ScoreBreakdown {
+  total: number
+  coverage: number // 0–1, weighted share of demand filled
+  mandatoryFilled: number
+  mandatoryTotal: number
+  optionalFilled: number
+  optionalTotal: number
+  fairness: number // 0 = perfect
+  preference: number // 0–1
+  patterns: number // bad patterns per member
+  laborCost: number | null
+  softRulePenalties: number
+}
+
+export interface GenerateResult {
+  engineVersion: string
+  seed: number
+  shifts: Shift[]
+  unfilled: UnfilledSlot[]
+  violations: Violation[]
+  score: ScoreBreakdown
+  members: MemberSummary[]
+  iterations: number
+}
