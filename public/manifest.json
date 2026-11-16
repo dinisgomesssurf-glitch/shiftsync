@@ -1,11 +1,11 @@
 {
   "name": "ShiftSync",
   "short_name": "ShiftSync",
-  "description": "Multi-organization shift scheduling, made simple.",
+  "description": "Staff rotas for caf\u00e9s, bars and shops.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f5f5f3",
-  "theme_color": "#1D9E75",
+  "background_color": "#FFFBF6",
+  "theme_color": "#FFFBF6",
   "orientation": "portrait",
   "icons": [
     {
