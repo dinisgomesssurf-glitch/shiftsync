@@ -1,16 +1,27 @@
-# React + Vite
+# ShiftSync
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Staff rotas for cafés, bars and shops. Managers describe their usual shifts, the team says when they can work, and ShiftSync builds a fair, legal week in one click.
 
-Currently, two official plugins are available:
+- **Live app:** https://shiftsync-swart.vercel.app
+- **Demo with sample data (no account):** https://shiftsync-swart.vercel.app/demo
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## How the code is organised
 
-## React Compiler
+| Folder | What lives there |
+| --- | --- |
+| `src/engine` | The scheduling engine and rule checker (TypeScript, no React, no database). Fully tested. |
+| `src/data` | Every database call (`supabaseApi.js`), the in-memory demo (`demoApi.js`) and the React hooks pages use (`hooks.js`). |
+| `src/lib` | Date helpers and the adapter between database rows and the engine. |
+| `src/ui` | The design system: buttons, fields, dialogs, menus, toasts, icons. |
+| `src/app` | Sign-in gate, routes and the navigation shell. |
+| `src/pages` | One file per screen: Schedule, Team, Settings, Setup, My shifts, My availability. |
+| `supabase` | Database migrations and the email function. |
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Commands
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```
+npm run dev        # local development
+npm test           # engine and adapter tests
+npm run typecheck  # TypeScript check of the engine
+npm run build      # production build
+```
